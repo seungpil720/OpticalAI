@@ -71,9 +71,7 @@ HTML_TEMPLATE = """
 
         {% if detections %}
             <div style="margin-top:30px;">
-                <h3>Analysis Result for: {{ selected_image }}</h3>
-                
-                <h3 style="text-align:left; border-bottom:1px solid #444; padding-bottom:10px;">Safety Report</h3>
+                <h3 style="text-align:left; border-bottom:1px solid #444; padding-bottom:10px;">Safety Report: {{ selected_image }}</h3>
                 {% for d in detections %}
                     <div class="item {{ d.status }}">
                         <div style="font-size:1.1em; font-weight:bold;">{{ d.label | upper }}</div>
