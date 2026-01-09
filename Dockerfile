@@ -1,13 +1,25 @@
-FROM python:3.10-slim
+# Use a lightweight Python base image
+FROM python:3.9-slim
 
-# 파이썬 로그 즉시 출력
-ENV PYTHONUNBUFFERED True
-ENV APP_HOME /app
-WORKDIR $APP_HOME
+# Set the working directory inside the container
+WORKDIR /app
 
-# [중요] 시스템 패키지 설치 (libgl1-mesa-glx 대신 libgl1 사용)
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0
+# Install system dependencies for OpenCV
+# This fixes the "libgl1-mesa-glx not found" error
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . ./
+# Copy requirements file first to use Docker caching
+COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy your app.py into the container
+COPY . .
+
+# Run the app using Gunicorn for production stability
+# Gunicorn handles the $PORT variable automatically for Google Cloud Run
 CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
