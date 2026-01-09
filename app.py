@@ -32,7 +32,7 @@ REAL_HEIGHTS = {
     "door": 2.05, "window": 1.20, "stairs": 1.00, "elevator": 2.20
 }
 
-# 모델 로드 (Dockerfile에서 미리 다운로드됨)
+# 모델 로드
 model = YOLO('yolov8n.pt')
 
 HTML_TEMPLATE = """
@@ -43,7 +43,7 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
-        .box { max-width: 800px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .box { max-width: 800px; margin: 0 auto; background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         h1 { margin-bottom: 20px; color: #4fc3f7; }
         .item { padding: 15px; margin: 10px 0; border-radius: 10px; text-align: left; border-left: 10px solid; background: #2c2c2c; }
         .STOP { background: #3d0b13; border-color: #ff1744; }
@@ -118,7 +118,6 @@ def index():
             try:
                 # 2. 이미지 로드 및 리사이즈
                 pil_img = Image.open(selected_image).convert('RGB')
-                # 비율 유지를 위해 썸네일 방식 대신 리사이즈 사용 (거리 계산용)
                 pil_img = pil_img.resize((IMAGE_SIZE, IMAGE_SIZE))
                 frame = np.array(pil_img)[:, :, ::-1].copy() # RGB to BGR for OpenCV
                 
