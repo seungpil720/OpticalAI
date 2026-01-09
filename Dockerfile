@@ -16,7 +16,7 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# [중요] 빌드 시점에 YOLO 모델을 미리 다운로드 (서버 시작 지연 방지)
+# [핵심 수정] 빌드 시점에 YOLO 모델을 미리 다운로드 (서버 시작 지연/타임아웃 방지)
 RUN python3 -c "from ultralytics import YOLO; model = YOLO('yolov8n.pt')"
 
 # Copy the rest of the app code
