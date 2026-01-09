@@ -5,15 +5,11 @@ import base64
 from flask import Flask, render_template_string, request
 from PIL import Image
 from ultralytics import YOLO
-from werkzeug.serving import make_server
 
-# ======================================================
-# Flask App
-# ======================================================
 app = Flask(__name__)
 
 # ======================================================
-# 설정 및 거리 계산
+# 설정 및 거리 계산 데이터
 # ======================================================
 IMAGE_SIZE = 640
 VFOV_DEG = 60
@@ -34,8 +30,9 @@ REAL_HEIGHTS = {
 }
 
 # ======================================================
-# YOLO Model
+# YOLO Model 로드
 # ======================================================
+# 모델 로드 (전역 변수로 한 번만 로드)
 model = YOLO("yolov8n.pt")
 
 # ======================================================
@@ -46,34 +43,42 @@ HTML_TEMPLATE = """
 <html>
 <head>
     <title>AI Distance & Hazard Detector</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: sans-serif; background: #f0f2f5; text-align: center; padding: 20px; }
         .container { background: white; max-width: 800px; margin: auto; padding: 20px;
                      border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .danger { background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; }
-        .safe { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; }
+        .danger { background: #ffebee; color: #c62828; padding: 10px; border-radius: 5px; margin: 5px 0; border: 1px solid #ffcdd2; }
+        .safe { background: #e8f5e9; color: #2e7d32; padding: 10px; border-radius: 5px; margin: 5px 0; border: 1px solid #c8e6c9; }
         img { max-width: 100%; border-radius: 5px; margin-top: 20px; }
+        button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #0056b3; }
     </style>
 </head>
 <body>
 <div class="container">
     <h1>📸 AI Distance & Hazard Detector</h1>
+    <p>Upload a photo to detect objects and estimate distance.</p>
 
     <form method="POST" enctype="multipart/form-data">
         <input type="file" name="image" accept="image/*" required>
         <br><br>
-        <button type="submit">Analyze</button>
+        <button type="submit">Analyze Image</button>
     </form>
 
     {% if result_image %}
-        <h2>Result</h2>
+        <h2>Analysis Result</h2>
         <img src="data:image/jpeg;base64,{{ result_image }}">
-        <h3>Distance Info</h3>
-        {% for item in detections %}
-            <div class="{{ 'danger' if item.dist < 2.0 else 'safe' }}">
-                <b>{{ item.label }}</b> : {{ item.dist }} m
-            </div>
-        {% endfor %}
+        
+        <div style="text-align: left; margin-top: 20px;">
+            <h3>📊 Detailed Info</h3>
+            {% for item in detections %}
+                <div class="{{ 'danger' if item.dist < 2.0 else 'safe' }}">
+                    <strong>{{ item.label }}</strong> : 약 {{ item.dist }}m 
+                    {% if item.dist < 2.0 %} (⚠️ WARNING) {% else %} (SAFE) {% endif %}
+                </div>
+            {% endfor %}
+        </div>
     {% endif %}
 </div>
 </body>
@@ -91,39 +96,54 @@ def index():
     if request.method == "POST":
         file = request.files.get("image")
         if file:
-            img = Image.open(file).convert("RGB")
-            img = img.resize((IMAGE_SIZE, IMAGE_SIZE))
-            frame = np.array(img)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            try:
+                # 이미지 읽기 및 변환
+                img = Image.open(file).convert("RGB")
+                img = img.resize((IMAGE_SIZE, IMAGE_SIZE))
+                frame = np.array(img)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-            results = model(frame, verbose=False)
+                # YOLO 추론
+                results = model(frame, verbose=False)
 
-            for r in results:
-                for box in r.boxes:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                    pixel_h = max(1, y2 - y1)
-                    if pixel_h < 20:
-                        continue
+                for r in results:
+                    for box in r.boxes:
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        pixel_h = max(1, y2 - y1)
+                        
+                        # 너무 작은 박스는 무시 (노이즈 제거)
+                        if pixel_h < 20:
+                            continue
 
-                    label = model.names[int(box.cls[0])]
-                    real_h = REAL_HEIGHTS.get(label, 0.5)
-                    dist = (real_h * FOCAL_LENGTH) / pixel_h
+                        cls_id = int(box.cls[0])
+                        label = model.names[cls_id]
+                        
+                        # 거리 계산
+                        real_h = REAL_HEIGHTS.get(label, 0.5)
+                        dist = (real_h * FOCAL_LENGTH) / pixel_h
 
-                    detections.append({
-                        "label": label.upper(),
-                        "dist": round(dist, 2)
-                    })
+                        detections.append({
+                            "label": label.upper(),
+                            "dist": round(dist, 2)
+                        })
 
-                    color = (0, 0, 255) if dist < 2.0 else (0, 255, 0)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(frame, f"{label} {dist:.1f}m",
-                                (x1, y1 - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                        # 이미지에 그리기
+                        color = (0, 0, 255) if dist < 2.0 else (0, 255, 0)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                        cv2.putText(frame, f"{label} {dist:.1f}m",
+                                    (x1, y1 - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-            detections.sort(key=lambda x: x["dist"])
+                # 결과 정렬
+                detections.sort(key=lambda x: x["dist"])
 
-            _, buf = cv2.imencode(".jpg", frame)
-            result_image = base64.b64encode(buf).decode()
+                # 이미지 인코딩
+                _, buf = cv2.imencode(".jpg", frame)
+                result_image = base64.b64encode(buf).decode("utf-8")
+
+            except Exception as e:
+                print(f"Error processing image: {e}")
+                return f"Error: {e}", 500
 
     return render_template_string(
         HTML_TEMPLATE,
@@ -132,24 +152,10 @@ def index():
     )
 
 # ======================================================
-# Auto-Port Runner (Jupyter-safe)
-# ======================================================
-def run_with_auto_port(app, host="0.0.0.0", start_port=8081, max_tries=50):
-    last_err = None
-    for port in range(start_port, start_port + max_tries):
-        try:
-            server = make_server(host, port, app)
-            print(f"✅ Running at http://{host}:{port}")
-            server.serve_forever()
-            return
-        except (OSError, SystemExit) as e:
-            print(f"⚠️ Port {port} busy, trying next...")
-            last_err = e
-    raise RuntimeError("No available port found") from last_err
-
-# ======================================================
-# Entry Point
+# Entry Point (Production vs Local)
 # ======================================================
 if __name__ == "__main__":
-    base_port = int(os.environ.get("PORT", 8081))
-    run_with_auto_port(app, start_port=base_port)
+    # 로컬 테스트용 (python app.py 실행 시에만 작동)
+    # Cloud Run(Gunicorn)에서는 이 블록이 실행되지 않음
+    port = int(os.environ.get("PORT", 8081))
+    app.run(host="0.0.0.0", port=port, debug=True)
