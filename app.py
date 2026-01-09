@@ -1,5 +1,6 @@
 import os
 import cv2
+import base64
 import numpy as np
 from flask import Flask, render_template_string, request
 from PIL import Image
@@ -31,7 +32,7 @@ REAL_HEIGHTS = {
     "door": 2.05, "window": 1.20, "stairs": 1.00, "elevator": 2.20
 }
 
-# 모델 로드 (Dockerfile에서 이미 다운로드됨)
+# 모델 로드 (Dockerfile에서 미리 다운로드됨)
 model = YOLO('yolov8n.pt')
 
 HTML_TEMPLATE = """
@@ -42,7 +43,7 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body { font-family: sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
-        .box { max-width: 600px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .box { max-width: 800px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         h1 { margin-bottom: 20px; color: #4fc3f7; }
         .item { padding: 15px; margin: 10px 0; border-radius: 10px; text-align: left; border-left: 10px solid; background: #2c2c2c; }
         .STOP { background: #3d0b13; border-color: #ff1744; }
@@ -51,7 +52,7 @@ HTML_TEMPLATE = """
         select { margin-bottom: 20px; width: 100%; padding: 10px; font-size: 16px; border-radius: 5px; }
         button { width: 100%; padding: 15px; font-weight: bold; background: #4fc3f7; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; color: #121212; }
         button:hover { background: #29b6f6; }
-        img.preview { width: 100%; border-radius: 10px; margin-bottom: 15px; border: 2px solid #555; }
+        img.result-img { width: 100%; max-width: 640px; border-radius: 10px; margin-top: 20px; border: 2px solid #555; }
     </style>
 </head>
 <body>
@@ -69,9 +70,16 @@ HTML_TEMPLATE = """
             <button type="submit">ANALYZE IMAGE</button>
         </form>
 
+        {% if img_data %}
+            <div style="margin-top:30px;">
+                <h3>Analysis Result</h3>
+                <img src="data:image/jpeg;base64,{{ img_data }}" class="result-img">
+            </div>
+        {% endif %}
+
         {% if detections %}
             <div style="margin-top:30px;">
-                <h3 style="text-align:left; border-bottom:1px solid #444; padding-bottom:10px;">Safety Report: {{ selected_image }}</h3>
+                <h3 style="text-align:left; border-bottom:1px solid #444; padding-bottom:10px;">Safety Report</h3>
                 {% for d in detections %}
                     <div class="item {{ d.status }}">
                         <div style="font-size:1.1em; font-weight:bold;">{{ d.label | upper }}</div>
@@ -90,57 +98,63 @@ HTML_TEMPLATE = """
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
-    # 1. 현재 폴더에 있는 이미지 파일 목록 가져오기 (.png, .jpg, .jpeg)
-    all_files = os.listdir('.')
-    image_list = [f for f in all_files if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
-    image_list.sort()
+    # 1. 파일 목록 가져오기
+    try:
+        all_files = os.listdir('.')
+        image_list = [f for f in all_files if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        image_list.sort()
+    except Exception as e:
+        image_list = []
+        print(f"Error reading directory: {e}")
 
     detections = []
+    img_data = None
     selected_image = image_list[0] if image_list else None
 
     if request.method == 'POST':
-        # 2. 선택된 파일 이름 가져오기
         selected_image = request.form.get('filename')
         
         if selected_image and selected_image in image_list:
             try:
-                # Load and prepare image
-                img = Image.open(selected_image).convert('RGB').resize((IMAGE_SIZE, IMAGE_SIZE))
-                frame = np.array(img)[:, :, ::-1].copy()
+                # 2. 이미지 로드 및 리사이즈
+                pil_img = Image.open(selected_image).convert('RGB')
+                # 비율 유지를 위해 썸네일 방식 대신 리사이즈 사용 (거리 계산용)
+                pil_img = pil_img.resize((IMAGE_SIZE, IMAGE_SIZE))
+                frame = np.array(pil_img)[:, :, ::-1].copy() # RGB to BGR for OpenCV
                 
-                # Run YOLO inference
+                # 3. YOLO 추론
                 results = model(frame, verbose=False, conf=0.20)[0]
                 
                 for box in results.boxes:
                     label = model.names[int(box.cls[0])]
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
                     
                     pixel_h = y2 - y1
                     center_x = (x1 + x2) / 2
                     
-                    # Estimate distance
+                    # 거리 계산
                     real_h = REAL_HEIGHTS.get(label, 0.6)
                     distance = (real_h * FOCAL_LENGTH) / pixel_h
                     
-                    # Ground contact bias
+                    # 바닥 보정
                     if y2 > 576: 
                         distance *= 0.75
                     
-                    # Determine Status
+                    # 상태 판단
                     if distance < 1.3: 
                         status = "STOP"
+                        color = (0, 0, 255) # Red
                     elif 1.3 <= distance <= 4.0: 
                         status = "WARNING"
+                        color = (0, 255, 255) # Yellow
                     else: 
                         status = "SAFE"
+                        color = (0, 255, 0) # Green
                     
-                    # Determine Position
-                    if center_x < 213: 
-                        pos = "Left"
-                    elif center_x > 427: 
-                        pos = "Right"
-                    else: 
-                        pos = "Ahead"
+                    # 위치 판단
+                    if center_x < 213: pos = "Left"
+                    elif center_x > 427: pos = "Right"
+                    else: pos = "Ahead"
                     
                     detections.append({
                         "label": label, 
@@ -148,14 +162,26 @@ def index():
                         "status": status, 
                         "pos": pos
                     })
+
+                    # 4. 이미지에 그리기 (Bounding Box & Text)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                    text = f"{label.upper()} {distance:.1f}m"
+                    cv2.putText(frame, text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                # 5. 결과 이미지 인코딩 (Base64)
+                _, buffer = cv2.imencode('.jpg', frame)
+                img_data = base64.b64encode(buffer).decode('utf-8')
                 
-                # Sort by distance (closest first)
                 detections.sort(key=lambda x: x['dist'])
                 
             except Exception as e:
                 print(f"Error processing image: {e}")
                 
-    return render_template_string(HTML_TEMPLATE, detections=detections, images=image_list, selected_image=selected_image)
+    return render_template_string(HTML_TEMPLATE, 
+                                  detections=detections, 
+                                  images=image_list, 
+                                  selected_image=selected_image,
+                                  img_data=img_data)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
