@@ -21,5 +21,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Run the app using Gunicorn for production stability
-# Gunicorn handles the $PORT variable automatically for Google Cloud Run
 CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 app:app
