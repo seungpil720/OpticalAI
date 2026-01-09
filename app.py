@@ -31,6 +31,7 @@ REAL_HEIGHTS = {
     "door": 2.05, "window": 1.20, "stairs": 1.00, "elevator": 2.20
 }
 
+# 모델 로드 (Dockerfile에서 이미 다운로드됨)
 model = YOLO('yolov8n.pt')
 
 HTML_TEMPLATE = """
@@ -47,22 +48,32 @@ HTML_TEMPLATE = """
         .STOP { background: #3d0b13; border-color: #ff1744; }
         .WARNING { background: #3d3b0b; border-color: #ffea00; }
         .SAFE { background: #0b3d1c; border-color: #00e676; }
-        input[type=file] { margin-bottom: 20px; width: 100%; color: #ccc; }
+        select { margin-bottom: 20px; width: 100%; padding: 10px; font-size: 16px; border-radius: 5px; }
         button { width: 100%; padding: 15px; font-weight: bold; background: #4fc3f7; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; color: #121212; }
         button:hover { background: #29b6f6; }
+        img.preview { width: 100%; border-radius: 10px; margin-bottom: 15px; border: 2px solid #555; }
     </style>
 </head>
 <body>
     <div class="box">
         <h1>Vision Guard AI</h1>
-        <p style="color:#aaa; font-size:0.9em;">Upload an image to detect obstacles and estimate distance.</p>
-        <form method="POST" enctype="multipart/form-data">
-            <input type="file" name="image" accept="image/*" required><br>
+        <p style="color:#aaa; font-size:0.9em;">Select an image to detect obstacles and estimate distance.</p>
+        
+        <form method="POST">
+            <select name="filename">
+                {% for img in images %}
+                    <option value="{{ img }}" {% if selected_image == img %}selected{% endif %}>{{ img }}</option>
+                {% endfor %}
+            </select>
+            <br>
             <button type="submit">ANALYZE IMAGE</button>
         </form>
+
         {% if detections %}
             <div style="margin-top:30px;">
-                <h3 style="text-align:left; border-bottom:1px solid #444; padding-bottom:10px;">Analysis Report</h3>
+                <h3>Analysis Result for: {{ selected_image }}</h3>
+                
+                <h3 style="text-align:left; border-bottom:1px solid #444; padding-bottom:10px;">Safety Report</h3>
                 {% for d in detections %}
                     <div class="item {{ d.status }}">
                         <div style="font-size:1.1em; font-weight:bold;">{{ d.label | upper }}</div>
@@ -81,13 +92,22 @@ HTML_TEMPLATE = """
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # 1. 현재 폴더에 있는 이미지 파일 목록 가져오기 (.png, .jpg, .jpeg)
+    all_files = os.listdir('.')
+    image_list = [f for f in all_files if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+    image_list.sort()
+
     detections = []
+    selected_image = image_list[0] if image_list else None
+
     if request.method == 'POST':
-        file = request.files.get('image')
-        if file:
+        # 2. 선택된 파일 이름 가져오기
+        selected_image = request.form.get('filename')
+        
+        if selected_image and selected_image in image_list:
             try:
                 # Load and prepare image
-                img = Image.open(file).convert('RGB').resize((IMAGE_SIZE, IMAGE_SIZE))
+                img = Image.open(selected_image).convert('RGB').resize((IMAGE_SIZE, IMAGE_SIZE))
                 frame = np.array(img)[:, :, ::-1].copy()
                 
                 # Run YOLO inference
@@ -137,7 +157,7 @@ def index():
             except Exception as e:
                 print(f"Error processing image: {e}")
                 
-    return render_template_string(HTML_TEMPLATE, detections=detections)
+    return render_template_string(HTML_TEMPLATE, detections=detections, images=image_list, selected_image=selected_image)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
