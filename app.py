@@ -134,7 +134,7 @@ def index():
 # ======================================================
 # Auto-Port Runner (Jupyter-safe)
 # ======================================================
-def run_with_auto_port(app, host="0.0.0.0", start_port=8080, max_tries=50):
+def run_with_auto_port(app, host="0.0.0.0", start_port=8081, max_tries=50):
     last_err = None
     for port in range(start_port, start_port + max_tries):
         try:
@@ -151,5 +151,5 @@ def run_with_auto_port(app, host="0.0.0.0", start_port=8080, max_tries=50):
 # Entry Point
 # ======================================================
 if __name__ == "__main__":
-    base_port = int(os.environ.get("PORT", 8080))
+    base_port = int(os.environ.get("PORT", 8081))
     run_with_auto_port(app, start_port=base_port)
